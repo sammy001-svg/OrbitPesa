@@ -18,6 +18,7 @@ require_once BASE_PATH . '/app/models/WalletUser.php';
 require_once BASE_PATH . '/app/models/WalletTransaction.php';
 require_once BASE_PATH . '/app/models/WalletPocket.php';
 require_once BASE_PATH . '/app/models/WalletNotification.php';
+require_once BASE_PATH . '/app/models/WalletReferral.php';
 require_once BASE_PATH . '/app/core/WebhookDispatcher.php';
 require_once BASE_PATH . '/app/core/Mailer.php';
 require_once BASE_PATH . '/app/middleware/admin_auth.php';
@@ -1141,6 +1142,13 @@ if ($method === 'POST') {
 
             if ($errs) { flash('wallet_error', implode(' ', $errs)); redirect('wallet/register'); }
 
+            $refCode = strtoupper(trim($_POST['referral_code'] ?? ''));
+            $refBy   = null;
+            if ($refCode) {
+                $refUser = WalletReferral::findByCode($refCode);
+                if ($refUser && $refUser['id'] !== null) $refBy = $refUser['id'];
+            }
+
             $newId = WalletUser::create([
                 'full_name'   => $name,
                 'email'       => $email,
@@ -1149,6 +1157,15 @@ if ($method === 'POST') {
                 'password'    => $pass,
                 'pin'         => $pin,
             ]);
+
+            // Assign referral code to new user
+            WalletReferral::assignCode($newId);
+
+            // Store referred_by and create referral record
+            if ($refBy) {
+                DB::query("UPDATE wallet_users SET referred_by = ? WHERE id = ?", [$refBy, $newId]);
+                WalletReferral::create($refBy, $newId);
+            }
 
             // Welcome deposit (sandbox)
             WalletUser::credit($newId, 1000.00);
@@ -1244,6 +1261,7 @@ if ($method === 'POST') {
                 $sender['full_name'] . ' sent you KES ' . number_format($amount, 2) . ($note ? ' — ' . $note : '') . '.',
                 '/wallet/transactions'
             );
+            WalletReferral::checkAndComplete($senderId);
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' sent to ' . $recipient['full_name'] . ' successfully.');
             redirect('wallet/send');
         }
@@ -1282,6 +1300,7 @@ if ($method === 'POST') {
                 'KES ' . number_format($amount) . ' ' . ($type === 'data' ? 'data bundle' : 'airtime') . ' sent to ' . $phone . ' (' . ucfirst($network) . ').',
                 '/wallet/transactions'
             );
+            WalletReferral::checkAndComplete($userId);
             flash('wallet_success', 'KES ' . number_format($amount) . ' ' . ($type === 'data' ? 'data bundle' : 'airtime') . ' sent to ' . $phone . '.');
             redirect('wallet/airtime');
         }
@@ -1319,6 +1338,7 @@ if ($method === 'POST') {
                 'KES ' . number_format($amount, 2) . ' paid to Paybill ' . $paybill . ', account ' . $account . '.',
                 '/wallet/transactions'
             );
+            WalletReferral::checkAndComplete($userId);
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' paid to Paybill ' . $paybill . ' (Acc: ' . $account . ').');
             redirect('wallet/paybill');
         }
@@ -1360,6 +1380,7 @@ if ($method === 'POST') {
                 'KES ' . number_format($amount, 2) . ' sent to ' . $dest . '. Fee: KES ' . number_format($fee, 2) . '.',
                 '/wallet/transactions'
             );
+            WalletReferral::checkAndComplete($userId);
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' sent via ' . $label . ' to ' . $dest . ' (fee: KES ' . number_format($fee, 2) . ').');
             redirect('wallet/transfer');
         }
@@ -1424,6 +1445,16 @@ if ($method === 'POST') {
                 '/wallet/profile'
             );
             flash('wallet_success', 'PIN changed successfully.');
+            redirect('wallet/profile');
+        }
+
+        case 'wallet/referral/generate': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId = $_SESSION['wallet_uid'];
+            $wu     = WalletUser::find($userId);
+            if (empty($wu['referral_code'])) {
+                WalletReferral::assignCode($userId);
+            }
             redirect('wallet/profile');
         }
 
@@ -1636,6 +1667,7 @@ if ($method === 'POST') {
                 'KES ' . number_format($amount, 2) . ' paid to ' . $bizName . '. Ref: ' . $ref . '.',
                 '/wallet/transactions'
             );
+            WalletReferral::checkAndComplete($userId);
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' paid to ' . $bizName . '. Ref: ' . $ref);
             redirect('wallet/pay-merchant');
         }

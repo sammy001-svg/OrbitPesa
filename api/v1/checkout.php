@@ -63,7 +63,7 @@ class CheckoutController {
         // Auto-complete simulated M-Pesa in test mode after 9 seconds
         if ($txn['status'] === 'pending' && $txn['channel'] === 'mpesa'
             && MPESA_ENV !== 'production'
-            && (time() - strtotime($txn['created_at'])) > 9)
+            && time() - strtotime($txn['created_at']) > 9)
         {
             Transaction::updateStatus($ref, 'completed');
             $txn = Transaction::findByRef($ref);
@@ -106,7 +106,7 @@ class CheckoutController {
         $txn = DB::fetch("SELECT * FROM transactions WHERE id = ?", [$txnId]);
         $ref = $txn['reference'];
 
-        if (MPESA_ENV === 'production' && MPESA_CONSUMER_KEY) {
+        if (MPESA_ENV === 'production' && MPESA_CONSUMER_KEY !== '') {
             $result = $this->sendRealStk($phone, (int)$amount, $desc, $ref);
         } else {
             $result = ['success' => true, 'checkout_request_id' => 'SIM_' . strtoupper(bin2hex(random_bytes(8)))];
@@ -139,7 +139,7 @@ class CheckoutController {
         if (!$holder)  api_error('Cardholder name is required', 422);
 
         [$em, $ey] = array_pad(explode('/', $expiry), 2, '');
-        if (!$em || !$ey || (int)$ey < (int)date('y') || ((int)$ey === (int)date('y') && (int)$em < (int)date('m'))) {
+        if (!$em || !$ey || (int)$ey < (int)date('y') || (int)$ey === (int)date('y') && (int)$em < (int)date('m')) {
             api_error('Card has expired', 422);
         }
 
@@ -267,7 +267,6 @@ class CheckoutController {
             $ch = curl_init('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials');
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_USERPWD=>MPESA_CONSUMER_KEY.':'.MPESA_CONSUMER_SECRET]);
             $token = json_decode(curl_exec($ch), true)['access_token'] ?? '';
-            curl_close($ch);
 
             $ts  = date('YmdHis');
             $pwd = base64_encode(MPESA_SHORTCODE . MPESA_PASSKEY . $ts);
@@ -284,7 +283,6 @@ class CheckoutController {
                 ]),
             ]);
             $res = json_decode(curl_exec($ch), true);
-            curl_close($ch);
             return ['success' => isset($res['CheckoutRequestID']), 'checkout_request_id' => $res['CheckoutRequestID'] ?? null];
         } catch (Exception $e) {
             return ['success' => false, 'message' => 'M-Pesa unavailable'];

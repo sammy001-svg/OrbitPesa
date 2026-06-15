@@ -1,9 +1,12 @@
 <?php
-$pageTitle = 'My Profile';
-$backUrl   = APP_URL . '/wallet/home';
-$wu        = $walletUser;
-$initial   = strtoupper(substr($wu['full_name'], 0, 1));
-$txnCount  = WalletTransaction::countForUser($wu['id']);
+$pageTitle    = 'My Profile';
+$backUrl      = APP_URL . '/wallet/home';
+$wu           = $walletUser;
+$initial      = strtoupper(substr($wu['full_name'], 0, 1));
+$txnCount     = WalletTransaction::countForUser($wu['id']);
+$refStats     = WalletReferral::statsForUser($wu['id']);
+$referralCode = $wu['referral_code'] ?? '';
+$referralLink = APP_URL . '/wallet/register?ref=' . urlencode($referralCode);
 ?>
 
 <!-- Profile hero -->
@@ -82,6 +85,77 @@ $txnCount  = WalletTransaction::countForUser($wu['id']);
     <span style="color:#0f172a;font-weight:700;font-family:<?= $label === 'Wallet ID' ? 'monospace' : 'inherit' ?>"><?= htmlspecialchars((string)$val) ?></span>
   </div>
   <?php endforeach; ?>
+</div>
+
+<!-- Referral & Cashback section -->
+<div class="profile-section-title">Referral & Cashback</div>
+<div style="margin:0 14px;background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05);padding:18px">
+
+  <?php if ($referralCode): ?>
+  <!-- Code display -->
+  <div style="background:#f4f0ff;border-radius:14px;padding:16px;text-align:center;margin-bottom:14px">
+    <div style="font-size:.7rem;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Your Referral Code</div>
+    <div style="font-size:1.8rem;font-weight:800;color:#0D1B3E;letter-spacing:4px"><?= htmlspecialchars($referralCode) ?></div>
+    <button onclick="copyRef('<?= addslashes($referralCode) ?>', this)"
+            style="margin-top:10px;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:7px 20px;font-size:.78rem;font-weight:600;cursor:pointer;font-family:inherit">
+      <i class="fas fa-copy"></i> Copy Code
+    </button>
+  </div>
+
+  <!-- Stats -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+    <div style="text-align:center;background:#f8fafc;border-radius:12px;padding:12px 8px">
+      <div style="font-size:1.3rem;font-weight:800;color:#0D1B3E"><?= $refStats['total'] ?></div>
+      <div style="font-size:.68rem;color:#64748b;font-weight:600;margin-top:2px">Invited</div>
+    </div>
+    <div style="text-align:center;background:#f0fdf4;border-radius:12px;padding:12px 8px">
+      <div style="font-size:1.3rem;font-weight:800;color:#158347"><?= $refStats['completed'] ?></div>
+      <div style="font-size:.68rem;color:#64748b;font-weight:600;margin-top:2px">Transacted</div>
+    </div>
+    <div style="text-align:center;background:#fef9c3;border-radius:12px;padding:12px 8px">
+      <div style="font-size:1.1rem;font-weight:800;color:#854d0e">KES <?= number_format($refStats['earned'], 0) ?></div>
+      <div style="font-size:.68rem;color:#64748b;font-weight:600;margin-top:2px">Earned</div>
+    </div>
+  </div>
+
+  <!-- Share row -->
+  <div style="font-size:.75rem;font-weight:600;color:#64748b;margin-bottom:8px">Share your link</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a href="https://wa.me/?text=<?= urlencode('Join me on OrbitPesa Wallet and earn KES 25 cashback on your first transaction! Use my referral code ' . $referralCode . ' when you sign up: ' . $referralLink) ?>"
+       target="_blank"
+       style="display:flex;align-items:center;gap:6px;background:#25d366;color:#fff;border-radius:10px;padding:8px 14px;font-size:.78rem;font-weight:600;text-decoration:none">
+      <i class="fab fa-whatsapp"></i> WhatsApp
+    </a>
+    <a href="sms:?body=<?= urlencode('Join OrbitPesa Wallet using my referral code ' . $referralCode . ': ' . $referralLink) ?>"
+       style="display:flex;align-items:center;gap:6px;background:#3b82f6;color:#fff;border-radius:10px;padding:8px 14px;font-size:.78rem;font-weight:600;text-decoration:none">
+      <i class="fas fa-sms"></i> SMS
+    </a>
+    <button onclick="copyRef('<?= addslashes($referralLink) ?>', this)"
+            style="display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#475569;border:none;border-radius:10px;padding:8px 14px;font-size:.78rem;font-weight:600;cursor:pointer;font-family:inherit">
+      <i class="fas fa-link"></i> Copy Link
+    </button>
+  </div>
+
+  <div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border-radius:10px;font-size:.75rem;color:#64748b;line-height:1.5">
+    <i class="fas fa-gift" style="color:#7c3aed"></i>
+    You earn <strong>KES 50</strong> and your friend earns <strong>KES 25</strong> when they complete their first transaction.
+  </div>
+
+  <?php else: ?>
+  <!-- No code yet — generate button -->
+  <div style="text-align:center;padding:10px 0">
+    <div style="font-size:1.6rem;margin-bottom:8px">🎁</div>
+    <div style="font-weight:600;color:#0D1B3E;font-size:.9rem;margin-bottom:6px">Get your referral code</div>
+    <div style="color:#64748b;font-size:.8rem;margin-bottom:14px">Invite friends and earn KES 50 for each one who transacts</div>
+    <form method="POST" action="<?= APP_URL ?>/wallet/referral/generate" style="margin:0">
+      <?= csrf_field() ?>
+      <button type="submit" class="wbtn wbtn-primary" style="background:#7c3aed">
+        <i class="fas fa-gift"></i> Generate My Code
+      </button>
+    </form>
+  </div>
+  <?php endif; ?>
+
 </div>
 
 <!-- Links -->

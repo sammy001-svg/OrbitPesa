@@ -80,6 +80,17 @@
         </div>
       </div>
 
+      <!-- Referral code -->
+      <div class="wauth-section-label">Referral <span style="font-weight:400;font-size:.7rem">(optional)</span></div>
+      <div class="wform-group">
+        <label class="wform-label">Friend's referral code</label>
+        <input type="text" name="referral_code" class="wform-control"
+               placeholder="e.g. A3F9B2C"
+               autocapitalize="characters" autocomplete="off" maxlength="10"
+               value="<?= htmlspecialchars($_GET['ref'] ?? $_POST['referral_code'] ?? '') ?>">
+        <div class="wform-hint">Both you and your friend earn cashback on your first transaction</div>
+      </div>
+
       <div class="mt-14">
         <button type="submit" class="wbtn wbtn-primary">Create Wallet <i class="fas fa-arrow-right"></i></button>
       </div>
