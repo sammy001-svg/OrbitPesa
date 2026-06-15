@@ -26,14 +26,25 @@ $recentTxns = WalletTransaction::getForUser($walletUser['id'], 6);
   <div class="wdivider" style="margin-top:14px">More Services</div>
 
   <div class="quick-grid">
+    <a href="<?= APP_URL ?>/wallet/pockets" class="quick-item">
+      <div class="quick-icon" style="background:#7c3aed"><i class="fas fa-piggy-bank"></i></div>
+      <span class="quick-label">Pockets</span>
+    </a>
+    <a href="<?= APP_URL ?>/wallet/pay-merchant" class="quick-item">
+      <div class="quick-icon" style="background:#0D1B3E"><i class="fas fa-store"></i></div>
+      <span class="quick-label">Pay Biz</span>
+    </a>
     <a href="<?= APP_URL ?>/wallet/transfer?type=mpesa" class="quick-item">
       <div class="quick-icon" style="background:#158347"><i class="fas fa-money-bill-wave"></i></div>
       <span class="quick-label">M-Pesa</span>
     </a>
     <a href="<?= APP_URL ?>/wallet/transfer?type=bank" class="quick-item">
-      <div class="quick-icon" style="background:#0D1B3E"><i class="fas fa-university"></i></div>
+      <div class="quick-icon" style="background:#475569"><i class="fas fa-university"></i></div>
       <span class="quick-label">Bank</span>
     </a>
+  </div>
+
+  <div class="quick-grid" style="margin-top:8px">
     <a href="<?= APP_URL ?>/wallet/airtime?type=data" class="quick-item">
       <div class="quick-icon" style="background:#2563eb"><i class="fas fa-wifi"></i></div>
       <span class="quick-label">Data</span>
@@ -42,10 +53,12 @@ $recentTxns = WalletTransaction::getForUser($walletUser['id'], 6);
       <?= csrf_field() ?>
       <input type="hidden" name="amount" value="1000">
       <button type="submit" class="quick-item" style="font-family:inherit">
-        <div class="quick-icon" style="background:#7c3aed"><i class="fas fa-plus-circle"></i></div>
+        <div class="quick-icon" style="background:#ea580c"><i class="fas fa-plus-circle"></i></div>
         <span class="quick-label">Top Up</span>
       </button>
     </form>
+    <div class="quick-item" style="visibility:hidden"></div>
+    <div class="quick-item" style="visibility:hidden"></div>
   </div>
 </div>
 

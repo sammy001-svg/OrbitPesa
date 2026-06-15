@@ -148,6 +148,10 @@
             <i class="fas fa-credit-card"></i>
             <span>Card</span>
           </button>
+          <button type="button" class="ch-btn" id="chWallet" onclick="setChannel('wallet')">
+            <i class="fas fa-wallet"></i>
+            <span>Wallet</span>
+          </button>
         </div>
 
         <!-- M-Pesa fields -->
@@ -198,6 +202,32 @@
           <div class="field">
             <label>Email <span style="font-weight:400;color:var(--muted)">(optional — for receipt)</span></label>
             <input type="email" id="cardEmail" placeholder="your@email.com">
+          </div>
+        </div>
+
+        <!-- OrbitPesa Wallet fields -->
+        <div id="fWallet" style="display:none">
+          <div style="background:#f0fdf4;border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;background:#158347;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <i class="fas fa-wallet" style="color:#fff;font-size:.85rem"></i>
+            </div>
+            <div style="font-size:.78rem;color:#166534">
+              <strong>Pay with OrbitPesa Wallet</strong><br>
+              Instant, free, and secure. Your balance is charged immediately.
+            </div>
+          </div>
+          <div class="field">
+            <label>Wallet ID / Email / Phone</label>
+            <input type="text" id="walletIdent" placeholder="OP0000000001 · 0712345678 · you@email.com"
+                   autocomplete="off">
+          </div>
+          <div class="field">
+            <label>4-digit PIN</label>
+            <input type="password" id="walletPin" placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off">
+          </div>
+          <div class="alert alert-info" style="font-size:.78rem">
+            <i class="fas fa-shield-alt"></i>
+            <span>Your PIN is encrypted and never stored by this merchant.</span>
           </div>
         </div>
 
@@ -260,10 +290,12 @@ let pollCount = 0;
 // ── Channel switcher ──────────────────────────────────────
 function setChannel(ch) {
   channel = ch;
-  document.getElementById('chMpesa').classList.toggle('active', ch === 'mpesa');
-  document.getElementById('chCard').classList.toggle('active',  ch === 'card');
-  document.getElementById('fMpesa').style.display = ch === 'mpesa' ? '' : 'none';
-  document.getElementById('fCard').style.display  = ch === 'card'  ? '' : 'none';
+  document.getElementById('chMpesa').classList.toggle('active',  ch === 'mpesa');
+  document.getElementById('chCard').classList.toggle('active',   ch === 'card');
+  document.getElementById('chWallet').classList.toggle('active', ch === 'wallet');
+  document.getElementById('fMpesa').style.display  = ch === 'mpesa'  ? '' : 'none';
+  document.getElementById('fCard').style.display   = ch === 'card'   ? '' : 'none';
+  document.getElementById('fWallet').style.display = ch === 'wallet' ? '' : 'none';
   const amt = getAmount();
   document.getElementById('payBtnTxt').textContent = 'Pay ' + (amt ? 'KES ' + amt.toLocaleString() : 'Now');
 }
@@ -315,7 +347,7 @@ async function submitPayment() {
     body.phone = phone;
     const email = document.getElementById('mpesaEmail').value.trim();
     if (email) body.email = email;
-  } else {
+  } else if (channel === 'card') {
     const num    = document.getElementById('cardNum').value.replace(/\s/g,'');
     const exp    = document.getElementById('cardExp').value;
     const cvv    = document.getElementById('cardCvv').value;
@@ -330,6 +362,13 @@ async function submitPayment() {
     body.card_holder  = holder;
     const cardEmail = document.getElementById('cardEmail').value.trim();
     if (cardEmail) body.email = cardEmail;
+  } else if (channel === 'wallet') {
+    const ident = document.getElementById('walletIdent').value.trim();
+    const pin   = document.getElementById('walletPin').value.trim();
+    if (!ident) { showAlert('Please enter your Wallet ID, email, or phone.'); reset(); return; }
+    if (!pin || pin.length !== 4) { showAlert('Please enter your 4-digit PIN.'); reset(); return; }
+    body.identifier = ident;
+    body.pin        = pin;
   }
 
   try {
@@ -344,6 +383,8 @@ async function submitPayment() {
 
     if (channel === 'card') {
       showSuccess('KES ' + parseFloat(data.data.amount).toLocaleString() + ' paid successfully via card ending ' + (data.data.card_last4 || '••••') + '.', data.data.reference);
+    } else if (channel === 'wallet') {
+      showSuccess('KES ' + parseFloat(data.data.amount).toLocaleString() + ' paid from OrbitPesa Wallet. Thank you, ' + data.data.payer_name + '!', data.data.reference);
     } else {
       startPolling(data.data.reference, amt);
     }

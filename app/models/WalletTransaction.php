@@ -41,7 +41,7 @@ class WalletTransaction {
     }
 
     public static function isCredit(string $type): bool {
-        return in_array($type, ['receive', 'deposit', 'cashback']);
+        return in_array($type, ['receive', 'deposit', 'cashback', 'pocket_out']);
     }
 
     public static function typeLabel(string $type): string {
@@ -55,6 +55,10 @@ class WalletTransaction {
             'mpesa_out'     => 'M-Pesa',
             'deposit'       => 'Top Up',
             'cashback'      => 'Cashback',
+            'payment'       => 'Business Payment',
+            'withdrawal'    => 'Withdrawal',
+            'pocket_in'     => 'Saved to Pocket',
+            'pocket_out'    => 'From Pocket',
             default         => ucfirst($type),
         };
     }
@@ -70,6 +74,10 @@ class WalletTransaction {
             'mpesa_out'     => 'fa-money-bill-wave',
             'deposit'       => 'fa-plus-circle',
             'cashback'      => 'fa-gift',
+            'payment'       => 'fa-store',
+            'withdrawal'    => 'fa-minus-circle',
+            'pocket_in'     => 'fa-piggy-bank',
+            'pocket_out'    => 'fa-piggy-bank',
             default         => 'fa-exchange-alt',
         };
     }
@@ -85,6 +93,10 @@ class WalletTransaction {
             'mpesa_out'     => '#158347',
             'deposit'       => '#7c3aed',
             'cashback'      => '#ec4899',
+            'payment'       => '#0D1B3E',
+            'withdrawal'    => '#dc2626',
+            'pocket_in'     => '#7c3aed',
+            'pocket_out'    => '#7c3aed',
             default         => '#64748b',
         };
     }

@@ -16,6 +16,8 @@ require_once BASE_PATH . '/app/models/Notification.php';
 require_once BASE_PATH . '/app/models/MpesaAccount.php';
 require_once BASE_PATH . '/app/models/WalletUser.php';
 require_once BASE_PATH . '/app/models/WalletTransaction.php';
+require_once BASE_PATH . '/app/models/WalletPocket.php';
+require_once BASE_PATH . '/app/models/WalletNotification.php';
 require_once BASE_PATH . '/app/core/WebhookDispatcher.php';
 require_once BASE_PATH . '/app/core/Mailer.php';
 require_once BASE_PATH . '/app/middleware/admin_auth.php';
@@ -95,7 +97,11 @@ $routes = [
     'wallet/paybill'      => ['handler' => 'wallet_paybill',  'auth' => false, 'layout' => null],
     'wallet/transfer'     => ['handler' => 'wallet_transfer', 'auth' => false, 'layout' => null],
     'wallet/transactions' => ['handler' => 'wallet_txns',     'auth' => false, 'layout' => null],
-    'wallet/profile'      => ['handler' => 'wallet_profile',  'auth' => false, 'layout' => null],
+    'wallet/profile'      => ['handler' => 'wallet_profile',    'auth' => false, 'layout' => null],
+    'wallet/pay-merchant' => ['handler' => 'wallet_pay_merchant','auth' => false, 'layout' => null],
+    'wallet/pockets'      => ['handler' => 'wallet_pockets',     'auth' => false, 'layout' => null],
+    'wallet/scan'          => ['handler' => 'wallet_scan',          'auth' => false, 'layout' => null],
+    'wallet/notifications' => ['handler' => 'wallet_notifications', 'auth' => false, 'layout' => null],
 ];
 
 // Wallet: user lookup (JSON)
@@ -110,6 +116,54 @@ if ($uri === 'wallet/find-user' && $method === 'GET') {
         exit;
     }
     echo json_encode(['found' => true, 'id' => $wu['id'], 'name' => $wu['full_name'], 'wallet_id' => $wu['wallet_id']]);
+    exit;
+}
+
+// Dynamic wallet route — pocket detail: wallet/pockets/{id}
+if (preg_match('#^wallet/pockets/([^/]+)$#', $uri, $m) && $method === 'GET') {
+    if (empty($_SESSION['wallet_uid'])) { redirect('wallet/login'); }
+    $pocket = WalletPocket::find($m[1]);
+    if (!$pocket || $pocket['wallet_user_id'] !== $_SESSION['wallet_uid']) {
+        http_response_code(404);
+        echo '<div style="text-align:center;padding:80px;font-family:sans-serif"><h2>Pocket not found</h2></div>';
+        exit;
+    }
+    $walletUser = WalletUser::find($_SESSION['wallet_uid']);
+    if (!$walletUser || $walletUser['status'] === 'suspended') {
+        unset($_SESSION['wallet_uid'], $_SESSION['wallet_user']);
+        redirect('wallet/login');
+    }
+    $data = ['walletUser' => $walletUser, 'pocket' => $pocket, 'pageTitle' => htmlspecialchars($pocket['name'])];
+    extract($data);
+    $content = function() use ($data, $walletUser) {
+        extract($data);
+        require BASE_PATH . '/views/wallet/pocket-detail.php';
+    };
+    require BASE_PATH . '/views/layouts/wallet.php';
+    exit;
+}
+
+// Wallet: find merchant by email/phone/business name (JSON)
+if ($uri === 'wallet/find-merchant' && $method === 'GET') {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['wallet_uid'])) { echo json_encode(['found' => false]); exit; }
+    $q = trim($_GET['q'] ?? '');
+    if (strlen($q) < 3) { echo json_encode(['found' => false]); exit; }
+    $like = '%' . $q . '%';
+    $merchant = DB::fetch(
+        "SELECT id, business_name, email FROM users WHERE status='active' AND (email LIKE ? OR phone LIKE ? OR business_name LIKE ?) LIMIT 1",
+        [$like, $like, $like]
+    );
+    if (!$merchant) { echo json_encode(['found' => false]); exit; }
+    echo json_encode(['found' => true, 'id' => $merchant['id'], 'name' => $merchant['business_name'], 'email' => $merchant['email']]);
+    exit;
+}
+
+// Wallet notifications: unread count (JSON for badge polling)
+if ($uri === 'wallet/notifications/count' && $method === 'GET') {
+    header('Content-Type: application/json');
+    $count = !empty($_SESSION['wallet_uid']) ? WalletNotification::unreadCount($_SESSION['wallet_uid']) : 0;
+    echo json_encode(['count' => $count]);
     exit;
 }
 
@@ -1185,6 +1239,11 @@ if ($method === 'POST') {
                 'status'           => 'completed',
             ]);
 
+            WalletNotification::create($recipientId, 'payment',
+                'You received KES ' . number_format($amount, 2),
+                $sender['full_name'] . ' sent you KES ' . number_format($amount, 2) . ($note ? ' — ' . $note : '') . '.',
+                '/wallet/transactions'
+            );
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' sent to ' . $recipient['full_name'] . ' successfully.');
             redirect('wallet/send');
         }
@@ -1218,6 +1277,11 @@ if ($method === 'POST') {
                 'description'      => 'KES ' . number_format($amount) . ' ' . ($type === 'data' ? 'data' : 'airtime') . ' for ' . $phone . ' (' . ucfirst($network) . ')',
                 'status'           => 'completed',
             ]);
+            WalletNotification::create($userId, 'purchase',
+                ($type === 'data' ? 'Data bundle' : 'Airtime') . ' purchased',
+                'KES ' . number_format($amount) . ' ' . ($type === 'data' ? 'data bundle' : 'airtime') . ' sent to ' . $phone . ' (' . ucfirst($network) . ').',
+                '/wallet/transactions'
+            );
             flash('wallet_success', 'KES ' . number_format($amount) . ' ' . ($type === 'data' ? 'data bundle' : 'airtime') . ' sent to ' . $phone . '.');
             redirect('wallet/airtime');
         }
@@ -1250,6 +1314,11 @@ if ($method === 'POST') {
                 'description'      => 'Paybill ' . $paybill . ' Acc: ' . $account,
                 'status'           => 'completed',
             ]);
+            WalletNotification::create($userId, 'purchase',
+                'Paybill payment sent',
+                'KES ' . number_format($amount, 2) . ' paid to Paybill ' . $paybill . ', account ' . $account . '.',
+                '/wallet/transactions'
+            );
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' paid to Paybill ' . $paybill . ' (Acc: ' . $account . ').');
             redirect('wallet/paybill');
         }
@@ -1286,6 +1355,11 @@ if ($method === 'POST') {
                 'description'      => $label . ' to ' . $dest,
                 'status'           => 'completed',
             ]);
+            WalletNotification::create($userId, 'transfer',
+                $label . ' transfer confirmed',
+                'KES ' . number_format($amount, 2) . ' sent to ' . $dest . '. Fee: KES ' . number_format($fee, 2) . '.',
+                '/wallet/transactions'
+            );
             flash('wallet_success', 'KES ' . number_format($amount, 2) . ' sent via ' . $label . ' to ' . $dest . ' (fee: KES ' . number_format($fee, 2) . ').');
             redirect('wallet/transfer');
         }
@@ -1344,8 +1418,226 @@ if ($method === 'POST') {
             if (!preg_match('/^\d{4}$/', $newPin)) { flash('wallet_error', 'New PIN must be exactly 4 digits.'); redirect('wallet/profile'); }
             if ($newPin !== $conPin) { flash('wallet_error', 'New PINs do not match.'); redirect('wallet/profile'); }
             WalletUser::updatePin($userId, $newPin);
+            WalletNotification::create($userId, 'security',
+                'PIN changed',
+                'Your wallet PIN was changed successfully. If you did not do this, contact support immediately.',
+                '/wallet/profile'
+            );
             flash('wallet_success', 'PIN changed successfully.');
             redirect('wallet/profile');
+        }
+
+        case 'wallet/notifications/read': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            WalletNotification::markRead($_POST['id'] ?? '', $_SESSION['wallet_uid']);
+            redirect('wallet/notifications');
+        }
+
+        case 'wallet/notifications/read-all': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            WalletNotification::markAllRead($_SESSION['wallet_uid']);
+            redirect('wallet/notifications');
+        }
+
+        case 'wallet/pockets/create': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId = $_SESSION['wallet_uid'];
+            $name   = trim($_POST['name'] ?? '');
+            $emoji  = trim($_POST['emoji'] ?? '💰');
+            $target = (float)($_POST['target_amount'] ?? 0);
+
+            if (strlen($name) < 2) { flash('wallet_error', 'Pocket name must be at least 2 characters.'); redirect('wallet/pockets'); }
+
+            $existing = WalletPocket::findForUser($userId);
+            if (count($existing) >= 10) { flash('wallet_error', 'You can have up to 10 pockets.'); redirect('wallet/pockets'); }
+
+            WalletPocket::create([
+                'wallet_user_id' => $userId,
+                'name'           => $name,
+                'emoji'          => mb_substr($emoji, 0, 5),
+                'target_amount'  => $target > 0 ? $target : null,
+            ]);
+            flash('wallet_success', '"' . $name . '" pocket created!');
+            redirect('wallet/pockets');
+        }
+
+        case 'wallet/pockets/deposit': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId   = $_SESSION['wallet_uid'];
+            $pocketId = trim($_POST['pocket_id'] ?? '');
+            $amount   = round((float)($_POST['amount'] ?? 0), 2);
+            $pin      = $_POST['pin'] ?? '';
+
+            $pocket = WalletPocket::find($pocketId);
+            if (!$pocket || $pocket['wallet_user_id'] !== $userId) { flash('wallet_error', 'Pocket not found.'); redirect('wallet/pockets'); }
+            if ($amount < 1) { flash('wallet_error', 'Enter at least KES 1.'); redirect('wallet/pockets/' . $pocketId); }
+
+            $wu = WalletUser::find($userId);
+            if (!WalletUser::verifyPin($pin, $wu['pin_hash'])) { flash('wallet_error', 'Incorrect PIN.'); redirect('wallet/pockets/' . $pocketId); }
+            if ((float)$wu['balance'] < $amount) { flash('wallet_error', 'Insufficient wallet balance.'); redirect('wallet/pockets/' . $pocketId); }
+
+            $balBefore = (float)$wu['balance'];
+            WalletUser::debit($userId, $amount);
+            WalletPocket::deposit($pocketId, $amount);
+
+            WalletTransaction::create([
+                'reference'         => 'PKD' . strtoupper(bin2hex(random_bytes(5))),
+                'wallet_user_id'    => $userId,
+                'type'              => 'pocket_in',
+                'amount'            => $amount,
+                'fee'               => 0.00,
+                'balance_before'    => $balBefore,
+                'balance_after'     => $balBefore - $amount,
+                'counterparty'      => $pocketId,
+                'counterparty_name' => $pocket['name'] . ' pocket',
+                'description'       => 'Saved to "' . $pocket['name'] . '" pocket',
+                'status'            => 'completed',
+            ]);
+            flash('wallet_success', 'KES ' . number_format($amount, 2) . ' saved to "' . $pocket['name'] . '".');
+            redirect('wallet/pockets/' . $pocketId);
+        }
+
+        case 'wallet/pockets/withdraw': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId   = $_SESSION['wallet_uid'];
+            $pocketId = trim($_POST['pocket_id'] ?? '');
+            $amount   = round((float)($_POST['amount'] ?? 0), 2);
+            $pin      = $_POST['pin'] ?? '';
+
+            $pocket = WalletPocket::find($pocketId);
+            if (!$pocket || $pocket['wallet_user_id'] !== $userId) { flash('wallet_error', 'Pocket not found.'); redirect('wallet/pockets'); }
+            if ($amount < 1) { flash('wallet_error', 'Enter at least KES 1.'); redirect('wallet/pockets/' . $pocketId); }
+            if ((float)$pocket['balance'] < $amount) { flash('wallet_error', 'Insufficient pocket balance.'); redirect('wallet/pockets/' . $pocketId); }
+
+            $wu = WalletUser::find($userId);
+            if (!WalletUser::verifyPin($pin, $wu['pin_hash'])) { flash('wallet_error', 'Incorrect PIN.'); redirect('wallet/pockets/' . $pocketId); }
+
+            $balBefore = (float)$wu['balance'];
+            WalletPocket::withdraw($pocketId, $amount);
+            WalletUser::credit($userId, $amount);
+
+            WalletTransaction::create([
+                'reference'         => 'PKW' . strtoupper(bin2hex(random_bytes(5))),
+                'wallet_user_id'    => $userId,
+                'type'              => 'pocket_out',
+                'amount'            => $amount,
+                'fee'               => 0.00,
+                'balance_before'    => $balBefore,
+                'balance_after'     => $balBefore + $amount,
+                'counterparty'      => $pocketId,
+                'counterparty_name' => $pocket['name'] . ' pocket',
+                'description'       => 'Withdrawn from "' . $pocket['name'] . '" pocket',
+                'status'            => 'completed',
+            ]);
+            flash('wallet_success', 'KES ' . number_format($amount, 2) . ' returned from "' . $pocket['name'] . '" to your wallet.');
+            redirect('wallet/pockets/' . $pocketId);
+        }
+
+        case 'wallet/pockets/delete': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId   = $_SESSION['wallet_uid'];
+            $pocketId = trim($_POST['pocket_id'] ?? '');
+
+            $pocket = WalletPocket::find($pocketId);
+            if (!$pocket || $pocket['wallet_user_id'] !== $userId) { flash('wallet_error', 'Pocket not found.'); redirect('wallet/pockets'); }
+
+            $remaining = (float)$pocket['balance'];
+            if ($remaining > 0) {
+                $wu        = WalletUser::find($userId);
+                $balBefore = (float)$wu['balance'];
+                WalletUser::credit($userId, $remaining);
+                WalletTransaction::create([
+                    'reference'         => 'PKC' . strtoupper(bin2hex(random_bytes(5))),
+                    'wallet_user_id'    => $userId,
+                    'type'              => 'pocket_out',
+                    'amount'            => $remaining,
+                    'fee'               => 0.00,
+                    'balance_before'    => $balBefore,
+                    'balance_after'     => $balBefore + $remaining,
+                    'counterparty'      => $pocketId,
+                    'counterparty_name' => $pocket['name'] . ' pocket',
+                    'description'       => '"' . $pocket['name'] . '" pocket closed — funds returned',
+                    'status'            => 'completed',
+                ]);
+            }
+            WalletPocket::delete($pocketId);
+            flash('wallet_success', '"' . $pocket['name'] . '" pocket deleted' . ($remaining > 0 ? '. KES ' . number_format($remaining, 2) . ' returned to your wallet.' : '.'));
+            redirect('wallet/pockets');
+        }
+
+        case 'wallet/pay-merchant': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId     = $_SESSION['wallet_uid'];
+            $merchantId = trim($_POST['merchant_id'] ?? '');
+            $amount     = round((float)($_POST['amount'] ?? 0), 2);
+            $pin        = $_POST['pin'] ?? '';
+            $note       = trim($_POST['note'] ?? '');
+
+            if (!$merchantId) { flash('wallet_error', 'Please search for and select a business.'); redirect('wallet/pay-merchant'); }
+            if ($amount < 1)  { flash('wallet_error', 'Enter a valid amount (min KES 1).'); redirect('wallet/pay-merchant'); }
+
+            $merchant = DB::fetch("SELECT * FROM users WHERE id=? AND status='active'", [$merchantId]);
+            if (!$merchant) { flash('wallet_error', 'Business not found or inactive.'); redirect('wallet/pay-merchant'); }
+
+            $wu = WalletUser::find($userId);
+            if (!WalletUser::verifyPin($pin, $wu['pin_hash'])) { flash('wallet_error', 'Incorrect PIN.'); redirect('wallet/pay-merchant'); }
+            if ((float)$wu['balance'] < $amount) { flash('wallet_error', 'Insufficient balance.'); redirect('wallet/pay-merchant'); }
+
+            $ref       = 'WP' . strtoupper(bin2hex(random_bytes(6)));
+            $balBefore = (float)$wu['balance'];
+            $balAfter  = $balBefore - $amount;
+            $bizName   = $merchant['business_name'];
+            $desc      = $note ?: 'Payment to ' . $bizName;
+
+            WalletUser::debit($userId, $amount);
+
+            WalletTransaction::create([
+                'reference'         => $ref,
+                'wallet_user_id'    => $userId,
+                'type'              => 'payment',
+                'amount'            => $amount,
+                'fee'               => 0.00,
+                'balance_before'    => $balBefore,
+                'balance_after'     => $balAfter,
+                'counterparty'      => $merchantId,
+                'counterparty_name' => $bizName,
+                'description'       => $desc,
+                'status'            => 'completed',
+            ]);
+
+            Wallet::credit($merchantId, $amount, 'OrbitPesa Wallet — ' . $ref);
+
+            $txnId = Transaction::create([
+                'user_id'     => $merchantId,
+                'amount'      => $amount,
+                'currency'    => 'KES',
+                'channel'     => 'wallet',
+                'description' => $desc,
+                'metadata'    => [
+                    'source'          => 'wallet_app',
+                    'payer_wallet_id' => $wu['wallet_id'],
+                    'payer_name'      => $wu['full_name'],
+                ],
+            ]);
+            $txn = DB::fetch("SELECT * FROM transactions WHERE id = ?", [$txnId]);
+            Transaction::updateStatus($txn['reference'], 'completed');
+
+            WebhookDispatcher::dispatch($merchantId, 'payment.completed',
+                WebhookDispatcher::buildPayload(Transaction::findByRef($txn['reference'])),
+                $txn['reference']
+            );
+            Notification::create($merchantId, 'payment', 'Wallet Payment Received',
+                format_amount($amount) . ' received from ' . $wu['full_name'] . ' via OrbitPesa Wallet.',
+                '/dashboard/transactions'
+            );
+
+            WalletNotification::create($userId, 'purchase',
+                'Payment to ' . $bizName,
+                'KES ' . number_format($amount, 2) . ' paid to ' . $bizName . '. Ref: ' . $ref . '.',
+                '/wallet/transactions'
+            );
+            flash('wallet_success', 'KES ' . number_format($amount, 2) . ' paid to ' . $bizName . '. Ref: ' . $ref);
+            redirect('wallet/pay-merchant');
         }
 
         case 'admin/disputes/update':
@@ -1528,6 +1820,21 @@ switch ($route['handler']) {
         break;
     case 'wallet_profile':
         renderWallet('profile', ['pageTitle' => 'My Profile', 'activeWalletNav' => 'profile']);
+        break;
+    case 'wallet_pay_merchant':
+        renderWallet('pay-merchant', ['pageTitle' => 'Pay Business', 'activeWalletNav' => '']);
+        break;
+    case 'wallet_pockets':
+        renderWallet('pockets', ['pageTitle' => 'Savings Pockets', 'activeWalletNav' => 'pockets']);
+        break;
+    case 'wallet_scan':
+        if (!empty($_GET['wid'])) {
+            redirect('wallet/send?wid=' . urlencode($_GET['wid']));
+        }
+        renderWallet('scan', ['pageTitle' => 'Scan QR Code', 'activeWalletNav' => '']);
+        break;
+    case 'wallet_notifications':
+        renderWallet('notifications', ['pageTitle' => 'Notifications', 'activeWalletNav' => 'notifications']);
         break;
     case 'devhome':
         require BASE_PATH . '/views/developers/index.php';

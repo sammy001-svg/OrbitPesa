@@ -1,6 +1,7 @@
 <?php
-$pageTitle = 'Send Money';
-$backUrl   = APP_URL . '/wallet/home';
+$pageTitle  = 'Send Money';
+$backUrl    = APP_URL . '/wallet/home';
+$prefillWid = trim($_GET['wid'] ?? '');
 ?>
 <div style="padding-top:6px">
 
@@ -120,5 +121,12 @@ $backUrl   = APP_URL . '/wallet/home';
       alert('Please search for and select a recipient first.');
     }
   });
+
+  // Pre-fill from QR scan (?wid=)
+  const prefill = '<?= addslashes($prefillWid) ?>';
+  if (prefill) {
+    search.value = prefill;
+    search.dispatchEvent(new Event('input'));
+  }
 })();
 </script>

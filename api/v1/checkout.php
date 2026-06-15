@@ -46,8 +46,10 @@ class CheckoutController {
             $this->processMpesa($merchantData, $amount, $desc, $link['id'], $slug);
         } elseif ($channel === 'card') {
             $this->processCard($merchantData, $amount, $desc, $link['id']);
+        } elseif ($channel === 'wallet') {
+            $this->processWallet($merchantData, $amount, $desc, $link['id'], $link);
         } else {
-            api_error('Unsupported channel. Use mpesa or card.', 422);
+            api_error('Unsupported channel. Use mpesa, card, or wallet.', 422);
         }
     }
 
@@ -170,6 +172,86 @@ class CheckoutController {
             'status'    => 'completed',
             'amount'    => $amount,
             'card_last4'=> $last4,
+        ], 'Payment successful');
+    }
+
+    private function processWallet(array $merchant, float $amount, string $desc, string $linkId, array $link): void {
+        $identifier = trim($this->body['identifier'] ?? '');
+        $pin        = $this->body['pin'] ?? '';
+
+        if (!$identifier) api_error('Wallet ID, email, or phone is required', 422);
+        if (!$pin)        api_error('PIN is required', 422);
+
+        $wu = WalletUser::findByIdentifier($identifier);
+        if (!$wu)                                          api_error('No wallet account found with that identifier', 404);
+        if ($wu['status'] !== 'active')                   api_error('Your wallet is suspended. Contact support.', 403);
+        if (!WalletUser::verifyPin($pin, $wu['pin_hash'])) api_error('Incorrect PIN', 401);
+        if ((float)$wu['balance'] < $amount)               api_error('Insufficient wallet balance', 402);
+
+        $balBefore = (float)$wu['balance'];
+        $balAfter  = $balBefore - $amount;
+        $ref       = 'WP' . strtoupper(bin2hex(random_bytes(6)));
+
+        WalletUser::debit($wu['id'], $amount);
+
+        $merchantRow = DB::fetch("SELECT * FROM users WHERE id = ?", [$merchant['user_id']]);
+        $bizName     = $merchantRow['business_name'] ?? 'Merchant';
+
+        WalletTransaction::create([
+            'reference'         => $ref,
+            'wallet_user_id'    => $wu['id'],
+            'type'              => 'payment',
+            'amount'            => $amount,
+            'fee'               => 0.00,
+            'balance_before'    => $balBefore,
+            'balance_after'     => $balAfter,
+            'counterparty'      => $merchant['user_id'],
+            'counterparty_name' => $bizName,
+            'description'       => 'Payment to ' . $bizName . ' — ' . $desc,
+            'status'            => 'completed',
+        ]);
+
+        Wallet::credit($merchant['user_id'], $amount, 'OrbitPesa Wallet — ' . $ref);
+
+        $txnId = Transaction::create([
+            'user_id'     => $merchant['user_id'],
+            'amount'      => $amount,
+            'currency'    => 'KES',
+            'channel'     => 'wallet',
+            'description' => $desc,
+            'metadata'    => [
+                'payment_link_id'  => $linkId,
+                'slug'             => $link['slug'],
+                'source'           => 'checkout',
+                'payer_wallet_id'  => $wu['wallet_id'],
+                'payer_name'       => $wu['full_name'],
+            ],
+        ]);
+        $txn = DB::fetch("SELECT * FROM transactions WHERE id = ?", [$txnId]);
+        Transaction::updateStatus($txn['reference'], 'completed');
+
+        WebhookDispatcher::dispatch($merchant['user_id'], 'payment.completed',
+            WebhookDispatcher::buildPayload(Transaction::findByRef($txn['reference'])),
+            $txn['reference']
+        );
+        if ($merchantRow) Mailer::paymentReceived($merchantRow, Transaction::findByRef($txn['reference']));
+        Notification::create($merchant['user_id'], 'payment', 'Wallet Payment Received',
+            format_amount($amount) . ' received from ' . $wu['full_name'] . ' via OrbitPesa Wallet.',
+            '/dashboard/transactions'
+        );
+
+        WalletNotification::create($wu['id'], 'purchase',
+            'Payment to ' . $bizName,
+            'KES ' . number_format($amount, 2) . ' paid to ' . $bizName . ' via payment link. Ref: ' . $ref . '.',
+            '/wallet/transactions'
+        );
+
+        api_success([
+            'reference'   => $ref,
+            'status'      => 'completed',
+            'amount'      => $amount,
+            'wallet_id'   => $wu['wallet_id'],
+            'payer_name'  => $wu['full_name'],
         ], 'Payment successful');
     }
 

@@ -15,6 +15,8 @@ require_once BASE_PATH . '/app/models/Webhook.php';
 require_once BASE_PATH . '/app/models/Notification.php';
 require_once BASE_PATH . '/app/core/WebhookDispatcher.php';
 require_once BASE_PATH . '/app/core/Mailer.php';
+require_once BASE_PATH . '/app/models/WalletUser.php';
+require_once BASE_PATH . '/app/models/WalletNotification.php';
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
