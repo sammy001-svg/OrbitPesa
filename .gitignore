@@ -1,0 +1,32 @@
+# Claude Code session data
+.claude/
+
+# PHP logs & cache
+*.log
+*.cache
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor directories
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Uploads (user-generated content)
+uploads/
+storage/
+
+# Environment overrides (create from config.php.example if needed)
+# app/config/config.php
+
+# Composer (not used, but just in case)
+vendor/
+composer.lock
+
+# XAMPP temp artifacts
+*.swp
+*~
