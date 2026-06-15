@@ -240,4 +240,18 @@ document.querySelectorAll('.wmodal-overlay').forEach(el => {
 // Auto-open modal if there was a profile or pin flash error
 <?php if (flash('wallet_profile_modal') === 'edit'): ?>openModal('editModal');<?php endif; ?>
 <?php if (flash('wallet_profile_modal') === 'pin'): ?>openModal('pinModal');<?php endif; ?>
+
+function copyRef(text, btn) {
+  const orig = btn.innerHTML;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+    setTimeout(() => { btn.innerHTML = orig; }, 2500);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+    setTimeout(() => { btn.innerHTML = orig; }, 2500);
+  });
+}
 </script>
