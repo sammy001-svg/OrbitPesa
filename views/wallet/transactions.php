@@ -37,6 +37,17 @@ $typeFilters = [
 ];
 ?>
 
+<!-- Export Statement shortcut -->
+<div style="display:flex;justify-content:flex-end;padding:10px 14px 0">
+  <a href="<?= APP_URL ?>/wallet/statement" id="btn-export-statement"
+     style="display:inline-flex;align-items:center;gap:6px;background:#0D1B3E;color:#fff;
+            border-radius:12px;padding:8px 16px;font-size:.78rem;font-weight:700;text-decoration:none;
+            box-shadow:0 3px 10px rgba(13,27,62,.25);transition:background .2s"
+     onmouseover="this.style.background='#158347'" onmouseout="this.style.background='#0D1B3E'">
+    <i class="fas fa-file-lines"></i> Export Statement
+  </a>
+</div>
+
 <!-- Filters -->
 <div class="history-filters">
   <?php foreach ($typeFilters as $val => $label): ?>

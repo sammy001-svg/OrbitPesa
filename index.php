@@ -98,12 +98,48 @@ $routes = [
     'wallet/paybill'      => ['handler' => 'wallet_paybill',  'auth' => false, 'layout' => null],
     'wallet/transfer'     => ['handler' => 'wallet_transfer', 'auth' => false, 'layout' => null],
     'wallet/transactions' => ['handler' => 'wallet_txns',     'auth' => false, 'layout' => null],
+    'wallet/statement'    => ['handler' => 'wallet_statement','auth' => false, 'layout' => null],
     'wallet/profile'      => ['handler' => 'wallet_profile',    'auth' => false, 'layout' => null],
+    'wallet/kyc'          => ['handler' => 'wallet_kyc',        'auth' => false, 'layout' => null],
     'wallet/pay-merchant' => ['handler' => 'wallet_pay_merchant','auth' => false, 'layout' => null],
     'wallet/pockets'      => ['handler' => 'wallet_pockets',     'auth' => false, 'layout' => null],
     'wallet/scan'          => ['handler' => 'wallet_scan',          'auth' => false, 'layout' => null],
     'wallet/notifications' => ['handler' => 'wallet_notifications', 'auth' => false, 'layout' => null],
+
+    // Merchant dashboard extras
+    'dashboard/disputes'   => ['handler' => 'disputes',   'auth' => true,  'layout' => 'app'],
 ];
+
+// Wallet CSV export: wallet/transactions/export
+if ($uri === 'wallet/transactions/export' && $method === 'GET') {
+    if (empty($_SESSION['wallet_uid'])) { header('Location: ' . APP_URL . '/wallet/login'); exit; }
+    $wu   = WalletUser::find($_SESSION['wallet_uid']);
+    if (!$wu) { header('Location: ' . APP_URL . '/wallet/login'); exit; }
+    $from = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from'] ?? '') ? $_GET['from'] : date('Y-m-d', strtotime('-30 days'));
+    $to   = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to'] ?? '')   ? $_GET['to']   : date('Y-m-d');
+    $rows = DB::fetchAll(
+        "SELECT * FROM wallet_transactions WHERE wallet_user_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at ASC",
+        [$wu['id'], $from . ' 00:00:00', $to . ' 23:59:59']
+    );
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment; filename="orbitpesa-wallet-statement-' . date('Ymd') . '.csv"');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Date','Reference','Type','Description','Counterparty','Amount','Fee','Balance Before','Balance After','Status']);
+    foreach ($rows as $r) {
+        fputcsv($out, [
+            date('d/m/Y H:i', strtotime($r['created_at'])),
+            $r['reference'], $r['type'],
+            $r['description'], $r['counterparty_name'] ?: $r['counterparty'],
+            number_format((float)$r['amount'], 2),
+            number_format((float)$r['fee'], 2),
+            number_format((float)$r['balance_before'], 2),
+            number_format((float)$r['balance_after'], 2),
+            $r['status'],
+        ]);
+    }
+    fclose($out);
+    exit;
+}
 
 // Wallet: user lookup (JSON)
 if ($uri === 'wallet/find-user' && $method === 'GET') {
@@ -1059,6 +1095,45 @@ if ($method === 'POST') {
             flash('success', "Weekly summary sent to $sent active merchants.");
             redirect('admin/settings');
 
+        // ─── Merchant Dispute filing ───────────────────────────────────────
+
+        case 'dashboard/disputes/file':
+            require_auth();
+            $dRef    = trim($_POST['transaction_ref_manual'] ?? trim($_POST['transaction_ref'] ?? ''));
+            $dReason = trim($_POST['reason'] ?? '');
+            $dCat    = preg_replace('/[^a-z_]/', '', $_POST['category'] ?? 'other');
+            $dAmt    = !empty($_POST['transaction_amount']) ? round((float)$_POST['transaction_amount'], 2) : null;
+
+            if (!$dRef) { flash('error', 'Please provide a transaction reference.'); redirect('dashboard/disputes'); }
+            if (strlen($dReason) < 20) { flash('error', 'Please provide a detailed reason (at least 20 characters).'); redirect('dashboard/disputes'); }
+
+            // Verify reference belongs to this merchant (or allow freeform)
+            $dTxn = DB::fetch("SELECT * FROM transactions WHERE reference=? AND user_id=?", [$dRef, $_SESSION['user_id']]);
+            if (!$dTxn && !$dAmt) {
+                // Allow freeform if the merchant typed one manually
+            }
+
+            // Check no duplicate dispute for same reference
+            $existing = DB::fetch("SELECT id FROM disputes WHERE transaction_ref=? AND user_id=?", [$dRef, $_SESSION['user_id']]);
+            if ($existing) {
+                flash('error', 'A dispute for this transaction reference already exists.');
+                redirect('dashboard/disputes');
+            }
+
+            DB::insert(
+                "INSERT INTO disputes (id, transaction_ref, user_id, reason, category, transaction_amount, status)
+                 VALUES (UUID(), ?, ?, ?, ?, ?, 'open')",
+                [$dRef, $_SESSION['user_id'], $dReason, $dCat, $dAmt]
+            );
+            Notification::create(
+                $_SESSION['user_id'], 'system',
+                'Dispute Submitted',
+                'Your dispute for transaction ' . $dRef . ' has been received and is under review.',
+                '/dashboard/disputes'
+            );
+            flash('success', 'Dispute filed successfully. We will review and respond within 3–5 business days.');
+            redirect('dashboard/disputes');
+
         // ─── Admin Wallet POST handlers ───────────────────────────────────
 
         case 'admin/wallet-users/suspend':
@@ -1110,6 +1185,32 @@ if ($method === 'POST') {
             ]);
             Admin::log($_SESSION['admin_id'], 'wallet_balance_adjust', 'wallet_user', $id, "KES $adjAmt $adjType — $adjNote");
             flash('success', ucfirst($adjType) . 'ed KES ' . number_format($adjAmt, 2) . ' successfully.');
+            redirect('admin/wallet-users/' . $id);
+
+        // ─── Admin Wallet KYC POST handlers ──────────────────────────────
+
+        case 'admin/wallet-users/kyc-approve':
+            AdminAuthMiddleware::handle();
+            $id     = $_POST['wallet_user_id'] ?? '';
+            $docId  = $_POST['doc_id'] ?? '';
+            $action = $_POST['action'] ?? 'approve';
+            $notes  = trim($_POST['notes'] ?? '');
+            $docSt  = $action === 'approve' ? 'approved' : 'rejected';
+            DB::query(
+                "UPDATE wallet_kyc_documents SET status=?, admin_notes=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?",
+                [$docSt, $notes ?: null, $_SESSION['admin_id'], $docId]
+            );
+            // Check if all docs are approved — if so, mark user as approved
+            if ($action === 'approve') {
+                $pending = DB::fetch("SELECT COUNT(*) as c FROM wallet_kyc_documents WHERE wallet_user_id=? AND status='pending'", [$id]);
+                if (($pending['c'] ?? 1) == 0) {
+                    DB::query("UPDATE wallet_users SET kyc_status='approved' WHERE id=?", [$id]);
+                }
+            } else {
+                DB::query("UPDATE wallet_users SET kyc_status='rejected' WHERE id=? AND kyc_status != 'approved'", [$id]);
+            }
+            Admin::log($_SESSION['admin_id'], "wallet_kyc_{$action}", 'wallet_user', $id, $notes);
+            flash('success', 'Wallet KYC document ' . ($action === 'approve' ? 'approved' : 'rejected') . '.');
             redirect('admin/wallet-users/' . $id);
 
         // ─── Consumer Wallet POST handlers ────────────────────────────────
@@ -1426,6 +1527,104 @@ if ($method === 'POST') {
             $_SESSION['wallet_user']['email']     = $email;
             flash('wallet_success', 'Profile updated successfully.');
             redirect('wallet/profile');
+        }
+
+        case 'wallet/profile/change-password': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId  = $_SESSION['wallet_uid'];
+            $curPass = $_POST['current_password'] ?? '';
+            $newPass = $_POST['new_password'] ?? '';
+            $conPass = $_POST['confirm_password'] ?? '';
+            $wu      = WalletUser::find($userId);
+            if (!WalletUser::verifyPassword($curPass, $wu['password'])) {
+                flash('wallet_error', 'Current password is incorrect.');
+                redirect('wallet/profile');
+            }
+            if (strlen($newPass) < 8) {
+                flash('wallet_error', 'New password must be at least 8 characters.');
+                redirect('wallet/profile');
+            }
+            if ($newPass !== $conPass) {
+                flash('wallet_error', 'New passwords do not match.');
+                redirect('wallet/profile');
+            }
+            DB::query(
+                "UPDATE wallet_users SET password=?, updated_at=NOW() WHERE id=?",
+                [password_hash($newPass, PASSWORD_BCRYPT), $userId]
+            );
+            WalletNotification::create($userId, 'security',
+                'Password changed',
+                'Your wallet password was changed successfully. If you did not do this, contact support immediately.',
+                '/wallet/profile'
+            );
+            flash('wallet_success', 'Password changed successfully.');
+            redirect('wallet/profile');
+        }
+
+        case 'wallet/kyc/upload': {
+            if (empty($_SESSION['wallet_uid'])) redirect('wallet/login');
+            $userId  = $_SESSION['wallet_uid'];
+            $docType = $_POST['doc_type'] ?? '';
+            $allowed = ['national_id_front','national_id_back','passport','selfie'];
+            if (!in_array($docType, $allowed)) {
+                flash('wallet_error', 'Invalid document type.');
+                redirect('wallet/kyc');
+            }
+            if (!isset($_FILES['document']) || $_FILES['document']['error'] !== UPLOAD_ERR_OK) {
+                $uploadErrors = [
+                    UPLOAD_ERR_NO_FILE    => 'No file was selected.',
+                    UPLOAD_ERR_INI_SIZE   => 'File exceeds server size limit.',
+                    UPLOAD_ERR_FORM_SIZE  => 'File exceeds form size limit.',
+                    UPLOAD_ERR_PARTIAL    => 'File was only partially uploaded.',
+                    UPLOAD_ERR_NO_TMP_DIR => 'Server temporary folder is missing.',
+                    UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+                ];
+                flash('wallet_error', $uploadErrors[$_FILES['document']['error'] ?? UPLOAD_ERR_NO_FILE] ?? 'File upload failed.');
+                redirect('wallet/kyc');
+            }
+            $file = $_FILES['document'];
+            if ($file['size'] > 5 * 1024 * 1024) {
+                flash('wallet_error', 'File size must not exceed 5 MB.');
+                redirect('wallet/kyc');
+            }
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+            $allowedMimes = ['image/jpeg', 'image/png', 'application/pdf'];
+            $mimeToExt    = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'application/pdf' => 'pdf'];
+            if (!in_array($mime, $allowedMimes)) {
+                flash('wallet_error', 'Only JPG, PNG and PDF files are accepted.');
+                redirect('wallet/kyc');
+            }
+            $ext  = $mimeToExt[$mime];
+            $dir  = BASE_PATH . '/storage/wallet-kyc/' . $userId;
+            if (!is_dir($dir)) mkdir($dir, 0755, true);
+            $filename = $docType . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            $dest     = $dir . '/' . $filename;
+            if (!move_uploaded_file($file['tmp_name'], $dest)) {
+                flash('wallet_error', 'Failed to save file. Please try again.');
+                redirect('wallet/kyc');
+            }
+            $filePath = 'storage/wallet-kyc/' . $userId . '/' . $filename;
+            // Remove any previously rejected doc of same type
+            DB::query(
+                "DELETE FROM wallet_kyc_documents WHERE wallet_user_id=? AND doc_type=? AND status='rejected'",
+                [$userId, $docType]
+            );
+            DB::insert(
+                "INSERT INTO wallet_kyc_documents (id, wallet_user_id, doc_type, file_path, status) VALUES (UUID(), ?, ?, ?, 'pending')",
+                [$userId, $docType, $filePath]
+            );
+            // Update overall kyc_status if it was unverified or rejected
+            DB::query(
+                "UPDATE wallet_users SET kyc_status='pending' WHERE id=? AND kyc_status IN ('unverified','rejected')",
+                [$userId]
+            );
+            WalletNotification::create($userId, 'kyc',
+                'KYC Document Submitted',
+                ucwords(str_replace('_', ' ', $docType)) . ' uploaded successfully. Our team will review it within 1–2 business days.',
+                '/wallet/kyc'
+            );
+            flash('wallet_success', ucwords(str_replace('_', ' ', $docType)) . ' submitted! We\'ll review it within 1–2 business days.');
+            redirect('wallet/kyc');
         }
 
         case 'wallet/profile/change-pin': {
@@ -1867,6 +2066,17 @@ switch ($route['handler']) {
         break;
     case 'wallet_notifications':
         renderWallet('notifications', ['pageTitle' => 'Notifications', 'activeWalletNav' => 'notifications']);
+        break;
+    case 'wallet_statement':
+        // Standalone page — no wallet shell layout (handles own auth)
+        if (empty($_SESSION['wallet_uid'])) { redirect('wallet/login'); }
+        require BASE_PATH . '/views/wallet/statement.php';
+        break;
+    case 'wallet_kyc':
+        renderWallet('kyc', ['pageTitle' => 'Verify Identity', 'activeWalletNav' => 'profile']);
+        break;
+    case 'disputes':
+        renderView('dashboard/disputes', ['pageTitle' => 'Disputes', 'activeNav' => 'disputes'], 'app');
         break;
     case 'devhome':
         require BASE_PATH . '/views/developers/index.php';

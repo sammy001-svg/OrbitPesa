@@ -61,6 +61,27 @@ $referralLink = APP_URL . '/wallet/register?ref=' . urlencode($referralCode);
     <div class="profile-menu-label">Change PIN</div>
     <i class="fas fa-chevron-right profile-menu-chevron"></i>
   </button>
+  <button class="profile-menu-item" style="border:none;width:100%;text-align:left;cursor:pointer;font-family:inherit"
+          onclick="openModal('passwordModal')">
+    <div class="profile-menu-icon navy"><i class="fas fa-key"></i></div>
+    <div class="profile-menu-label">Change Password</div>
+    <i class="fas fa-chevron-right profile-menu-chevron"></i>
+  </button>
+  <a href="<?= APP_URL ?>/wallet/kyc" class="profile-menu-item">
+    <div class="profile-menu-icon" style="background:#f0fdf4"><i class="fas fa-shield-halved" style="color:#158347"></i></div>
+    <div class="profile-menu-label">
+      Verify Identity
+      <?php $kycSt = $wu['kyc_status'] ?? 'unverified'; ?>
+      <?php if ($kycSt === 'approved'): ?>
+        <span style="font-size:.68rem;background:#dcfce7;color:#158347;border-radius:6px;padding:1px 7px;margin-left:6px;font-weight:700">Verified</span>
+      <?php elseif ($kycSt === 'pending'): ?>
+        <span style="font-size:.68rem;background:#fffbeb;color:#d97706;border-radius:6px;padding:1px 7px;margin-left:6px;font-weight:700">Pending</span>
+      <?php else: ?>
+        <span style="font-size:.68rem;background:#f1f5f9;color:#94a3b8;border-radius:6px;padding:1px 7px;margin-left:6px;font-weight:700">Unverified</span>
+      <?php endif; ?>
+    </div>
+    <i class="fas fa-chevron-right profile-menu-chevron"></i>
+  </a>
   <a href="<?= APP_URL ?>/wallet/transactions" class="profile-menu-item">
     <div class="profile-menu-icon navy"><i class="fas fa-history"></i></div>
     <div class="profile-menu-label">Transaction History</div>
@@ -161,6 +182,11 @@ $referralLink = APP_URL . '/wallet/register?ref=' . urlencode($referralCode);
 <!-- Links -->
 <div class="profile-section-title">Links</div>
 <div style="margin:0 14px;background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05)">
+  <a href="<?= APP_URL ?>/wallet/statement" class="profile-menu-item">
+    <div class="profile-menu-icon navy"><i class="fas fa-file-lines"></i></div>
+    <div class="profile-menu-label">Download Statement</div>
+    <i class="fas fa-chevron-right profile-menu-chevron"></i>
+  </a>
   <a href="<?= APP_URL ?>/" class="profile-menu-item" target="_blank">
     <div class="profile-menu-icon navy"><i class="fas fa-store"></i></div>
     <div class="profile-menu-label">OrbitPesa Merchant</div>
@@ -196,6 +222,37 @@ $referralLink = APP_URL . '/wallet/register?ref=' . urlencode($referralCode);
         <input type="tel" name="phone" class="wform-control" value="<?= htmlspecialchars($wu['phone']) ?>">
       </div>
       <button type="submit" class="wbtn wbtn-primary" style="margin-top:8px">Save Changes</button>
+    </form>
+  </div>
+</div>
+
+</div>
+
+<!-- Change Password Modal -->
+<div class="wmodal-overlay" id="passwordModal">
+  <div class="wmodal">
+    <div class="wmodal-hd">
+      <span class="wmodal-title">Change Password</span>
+      <button class="wmodal-close" onclick="closeModal('passwordModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <form method="POST" action="<?= APP_URL ?>/wallet/profile/change-password">
+      <?= csrf_field() ?>
+      <div class="wform-group">
+        <label class="wform-label">Current Password</label>
+        <input type="password" name="current_password" class="wform-control"
+               placeholder="Enter current password" required autocomplete="current-password">
+      </div>
+      <div class="wform-group">
+        <label class="wform-label">New Password</label>
+        <input type="password" name="new_password" class="wform-control"
+               placeholder="Min 8 characters" required autocomplete="new-password">
+      </div>
+      <div class="wform-group">
+        <label class="wform-label">Confirm New Password</label>
+        <input type="password" name="confirm_password" class="wform-control"
+               placeholder="Re-enter new password" required autocomplete="new-password">
+      </div>
+      <button type="submit" class="wbtn wbtn-primary" style="margin-top:8px">Change Password</button>
     </form>
   </div>
 </div>

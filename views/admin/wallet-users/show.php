@@ -9,6 +9,20 @@ $txnStats  = DB::fetch(
      FROM wallet_transactions WHERE wallet_user_id=? AND status='completed'",
     [$wu['id']]
 ) ?? [];
+
+// KYC documents
+$kycDocs   = DB::fetchAll(
+    "SELECT * FROM wallet_kyc_documents WHERE wallet_user_id=? ORDER BY created_at DESC",
+    [$wu['id']]
+);
+$kycStatus = $wu['kyc_status'] ?? 'unverified';
+$kycLabels = [
+    'unverified' => ['chip' => '', 'label' => 'Unverified',   'color' => '#94a3b8', 'bg' => '#f1f5f9'],
+    'pending'    => ['chip' => 'orange', 'label' => 'Pending Review','color' => '#d97706', 'bg' => '#fffbeb'],
+    'approved'   => ['chip' => 'green',  'label' => 'KYC Approved',  'color' => '#158347', 'bg' => '#f0fdf4'],
+    'rejected'   => ['chip' => '',       'label' => 'KYC Rejected',  'color' => '#dc2626', 'bg' => '#fef2f2'],
+];
+$ks = $kycLabels[$kycStatus] ?? $kycLabels['unverified'];
 ?>
 
 <div class="section-hd">
@@ -123,6 +137,120 @@ $txnStats  = DB::fetch(
   </div>
 </div>
 
+<!-- KYC Documents Panel -->
+<div class="card mb-5">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+    <h4>
+      <i class="fas fa-shield-halved" style="color:var(--green);margin-right:6px"></i>
+      KYC Verification
+    </h4>
+    <span style="background:<?= $ks['bg'] ?>;color:<?= $ks['color'] ?>;border-radius:8px;padding:4px 12px;font-size:.78rem;font-weight:700">
+      <?= $ks['label'] ?>
+    </span>
+  </div>
+  <?php if (empty($kycDocs)): ?>
+  <div class="empty-state" style="padding:30px 0">
+    <i class="fas fa-id-card" style="font-size:1.8rem;color:#cbd5e1;display:block;margin-bottom:8px"></i>
+    <p>No documents submitted yet.</p>
+  </div>
+  <?php else: ?>
+  <div class="table-wrap">
+    <table class="orb-table">
+      <thead>
+        <tr>
+          <th>Document Type</th>
+          <th>File</th>
+          <th>Submitted</th>
+          <th>Status</th>
+          <th>Notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php
+        $docTypeLabels = [
+            'national_id_front' => 'National ID (Front)',
+            'national_id_back'  => 'National ID (Back)',
+            'passport'          => 'Passport',
+            'selfie'            => 'Selfie with ID',
+        ];
+        $docStatusStyles = [
+            'pending'  => 'chip orange',
+            'approved' => 'chip green',
+            'rejected' => 'chip',
+        ];
+        foreach ($kycDocs as $doc):
+          $ds = $docStatusStyles[$doc['status']] ?? 'chip';
+        ?>
+        <tr>
+          <td style="font-weight:600;font-size:.84rem"><?= htmlspecialchars($docTypeLabels[$doc['doc_type']] ?? $doc['doc_type']) ?></td>
+          <td>
+            <a href="<?= APP_URL ?>/<?= htmlspecialchars($doc['file_path']) ?>" target="_blank"
+               class="btn btn-ghost btn-sm" style="font-size:.76rem">
+              <i class="fas fa-eye"></i> View
+            </a>
+          </td>
+          <td style="font-size:.8rem;color:var(--text-muted)"><?= date('d M Y', strtotime($doc['created_at'])) ?></td>
+          <td>
+            <span class="<?= $ds ?>" style="<?= $doc['status'] === 'rejected' ? 'background:#fef2f2;color:#dc2626;border:1px solid #fecaca' : '' ?>">
+              <?= ucfirst($doc['status']) ?>
+            </span>
+          </td>
+          <td style="font-size:.8rem;color:var(--text-muted);max-width:160px">
+            <?= $doc['admin_notes'] ? htmlspecialchars(mb_substr($doc['admin_notes'], 0, 60)) : '—' ?>
+          </td>
+          <td>
+            <?php if ($doc['status'] === 'pending'): ?>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <form method="POST" action="<?= APP_URL ?>/admin/wallet-users/kyc-approve" style="display:inline">
+                <?= csrf_field() ?>
+                <input type="hidden" name="wallet_user_id" value="<?= sanitize($wu['id']) ?>">
+                <input type="hidden" name="doc_id" value="<?= sanitize($doc['id']) ?>">
+                <input type="hidden" name="action" value="approve">
+                <button type="submit" class="btn btn-primary btn-sm"
+                        data-confirm="Approve this document?">
+                  <i class="fas fa-check"></i> Approve
+                </button>
+              </form>
+              <button type="button" class="btn btn-danger btn-sm"
+                      onclick="openRejectModal('<?= addslashes($doc['id']) ?>','<?= addslashes($wu['id']) ?>')">
+                <i class="fas fa-times"></i> Reject
+              </button>
+            </div>
+            <?php else: ?>
+            <span style="color:#94a3b8;font-size:.8rem">—</span>
+            <?php endif; ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php endif; ?>
+</div>
+
+<!-- Reject KYC Document Modal -->
+<div id="rejectKycModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:16px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 24px 60px rgba(0,0,0,.2)">
+    <h3 style="margin:0 0 16px;color:var(--navy)">Reject KYC Document</h3>
+    <form method="POST" action="<?= APP_URL ?>/admin/wallet-users/kyc-approve">
+      <?= csrf_field() ?>
+      <input type="hidden" name="wallet_user_id" id="rkWuId" value="">
+      <input type="hidden" name="doc_id" id="rkDocId" value="">
+      <input type="hidden" name="action" value="reject">
+      <div style="margin-bottom:14px">
+        <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:6px">Rejection Reason</label>
+        <textarea name="notes" rows="3" required class="form-control"
+                  placeholder="Explain why the document was rejected…"></textarea>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('rejectKycModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-danger">Reject Document</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Transactions -->
 <div class="card">
   <div class="card-header">
@@ -229,4 +357,13 @@ function toggleAdjust(radio) {
 }
 // Highlight default
 document.getElementById('creditLabel').style.border = '2px solid var(--green)';
+
+function openRejectModal(docId, wuId) {
+  document.getElementById('rkDocId').value = docId;
+  document.getElementById('rkWuId').value  = wuId;
+  document.getElementById('rejectKycModal').style.display = 'flex';
+}
+document.getElementById('rejectKycModal')?.addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
 </script>

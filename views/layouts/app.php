@@ -86,6 +86,9 @@
         <span style="background:#ef4444;color:#fff;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px"><?= $notifUnread > 99 ? '99+' : $notifUnread ?></span>
       <?php endif; ?>
     </a>
+    <a href="<?= APP_URL ?>/dashboard/disputes" class="nav-item <?= $activeNav === 'disputes' ? 'active' : '' ?>">
+      <i class="fas fa-scale-balanced"></i> Disputes
+    </a>
     <?php $kycUser = auth_user(); $kycBadge = $kycUser['kyc_status'] ?? 'unverified'; ?>
     <a href="<?= APP_URL ?>/dashboard/kyc" class="nav-item <?= $activeNav === 'kyc' ? 'active' : '' ?>" style="display:flex;align-items:center;justify-content:space-between">
       <span><i class="fas fa-id-card"></i> KYC Verification</span>

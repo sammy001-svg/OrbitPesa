@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     fee         DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     net_amount  DECIMAL(18,2) GENERATED ALWAYS AS (amount - fee) STORED,
     currency    CHAR(3)       NOT NULL DEFAULT 'KES',
-    channel     ENUM('mpesa','card','wallet','bank','payment_link') NOT NULL,
+    channel     ENUM('mpesa','mpesa_c2b','card','wallet','bank','payment_link') NOT NULL,
     phone       VARCHAR(20)   NULL,
     card_last4  CHAR(4)       NULL,
     description TEXT          NULL,
@@ -187,11 +187,52 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 ) ENGINE=InnoDB;
 
 -- =============================================
+-- NOTIFICATIONS (Merchant)
+-- =============================================
+CREATE TABLE IF NOT EXISTS notifications (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    user_id         CHAR(36)        NOT NULL,
+    type            VARCHAR(50)     NOT NULL DEFAULT 'system',
+    title           VARCHAR(150)    NOT NULL,
+    body            TEXT            NOT NULL,
+    url             VARCHAR(255)    DEFAULT NULL,
+    is_read         TINYINT(1)      NOT NULL DEFAULT 0,
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_n_user_read (user_id, is_read, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MPESA ACCOUNTS (Applications)
+-- =============================================
+CREATE TABLE IF NOT EXISTS mpesa_accounts (
+    id                  CHAR(36)        NOT NULL PRIMARY KEY,
+    user_id             CHAR(36)        DEFAULT NULL,
+    application_type    VARCHAR(50)     NOT NULL,
+    business_name       VARCHAR(150)    NOT NULL,
+    business_reg_no     VARCHAR(100)    DEFAULT NULL,
+    contact_name        VARCHAR(150)    NOT NULL,
+    contact_email       VARCHAR(150)    NOT NULL,
+    contact_phone       VARCHAR(20)     NOT NULL,
+    business_type       VARCHAR(50)     NOT NULL,
+    monthly_volume      VARCHAR(50)     NOT NULL,
+    description         TEXT            DEFAULT NULL,
+    account_number      VARCHAR(50)     DEFAULT NULL,
+    status              ENUM('pending','under_review','approved','rejected') NOT NULL DEFAULT 'pending',
+    reviewed_by         CHAR(36)        DEFAULT NULL,
+    reviewed_at         DATETIME        DEFAULT NULL,
+    admin_notes         TEXT            DEFAULT NULL,
+    created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_mpesa_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- SEED: Demo user
 -- =============================================
 INSERT IGNORE INTO users (id, business_name, email, phone, password, account_type, status, kyc_status) VALUES
 ('11111111-0000-0000-0000-000000000001', 'Demo Business', 'demo@orbitpesa.com', '0712000000',
- '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'business', 'active', 'verified');
+ '$2y$12$Tx3eqks2iiSH/H8NpKtVke87vvsgZEtwh2deLVSIktI8wR8RYY1Tu', 'business', 'active', 'verified');
 -- Password: password
 
 INSERT IGNORE INTO wallets (id, user_id, balance, currency) VALUES

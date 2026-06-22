@@ -118,5 +118,5 @@ CREATE TABLE IF NOT EXISTS disputes (
 -- =============================================
 INSERT IGNORE INTO admins (id, name, email, password, role) VALUES
 ('AAAAAAAA-0000-0000-0000-000000000001', 'Super Admin', 'admin@orbitpesa.com',
- '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'super_admin');
+ '$2y$12$Tx3eqks2iiSH/H8NpKtVke87vvsgZEtwh2deLVSIktI8wR8RYY1Tu', 'super_admin');
 -- Password: password
